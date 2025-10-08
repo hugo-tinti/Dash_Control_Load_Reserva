@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patheffects as path_effects
 import plotly.graph_objects as go
 import warnings
 import matplotlib.colors as colors
@@ -79,8 +78,9 @@ sns.set_theme(context="talk", style="whitegrid")
 # =========================
 CONFIG_ANALISIS = {
     'rutas': {
-        'archivo_principal': '/Users/hugotinti/Desktop/CAI DAR Dash/StreamGithub/Reserva/GpsDataBase.xlsx',
-        'archivo_20w': '/Users/hugotinti/Desktop/CAI DAR Dash/StreamGithub/Reserva/GpsDataBase.xlsx'
+        # Cambiado a ruta relativa, el archivo Excel debe estar en la misma carpeta que el script
+        'archivo_principal': 'GpsDataBase.xlsx',
+        'archivo_20w': 'GpsDataBase.xlsx'
     },
     'columnas': {
         'fecha': 'Fecha',
@@ -217,6 +217,7 @@ class GestorDatos:
         except Exception as e:
             logger.error(f"Error al cargar datos desde {file_path}: {e}")
             return None
+
 
     @log_operacion
     def procesar_dataset_unificado(self, df: pd.DataFrame, es_dataset_20w: bool = False, fecha_limite: pd.Timestamp = None) -> Dict:
@@ -599,8 +600,8 @@ class AnalizadorEntrenamientos:
     def _analizar_variable_streamlit(self, variable: str, datos: Dict):
         """Analiza una variable específica para Streamlit"""
         try:
-            data, pestañas, tendencias = self._preparar_datos_analisis(variable, datos)
-            fig = self._generar_grafico_profesional_streamlit(variable, data, datos['info_entrenamiento'], pestañas, tendencias)
+            data, pestañas = self._preparar_datos_analisis(variable, datos)
+            fig = self._generar_grafico_profesional_streamlit(variable, data, datos['info_entrenamiento'], pestañas)
             if fig:
                 st.pyplot(fig, use_container_width=True)
                 plt.close(fig)
@@ -639,8 +640,6 @@ class AnalizadorEntrenamientos:
         )
 
         pestañas = {}
-        tendencias = {}
-        
         for jugador in data.index:
             mask = (
                 (historico_total[col_jugador] == jugador) &
@@ -655,32 +654,19 @@ class AnalizadorEntrenamientos:
                 }
             else:
                 pestañas[jugador] = {'media3w': np.nan, 'std3w': np.nan}
-            
-            # Obtener últimos 21 días de datos para sparkline
-            mask_tendencia = (
-                (historico_total[col_jugador] == jugador) &
-                (historico_total[col_fecha] <= fecha_actual)
-            )
-            ultimos_21dias = historico_total[mask_tendencia].sort_values(col_fecha, ascending=False).head(21)
-            
-            if len(ultimos_21dias) >= 2:
-                valores_tendencia = ultimos_21dias.sort_values(col_fecha)[variable].values
-                tendencias[jugador] = valores_tendencia
-            else:
-                tendencias[jugador] = np.array([])
 
-        return data.sort_values('z', ascending=False, na_position='last'), pestañas, tendencias
+        return data.sort_values('z', ascending=False, na_position='last'), pestañas
 
-    def _generar_grafico_profesional_streamlit(self, variable: str, data: pd.DataFrame, info_entrenamiento: Dict, pestañas: Dict, tendencias: Dict):
-        """Genera gráfico profesional con sparklines integrados en las barras"""
-        fig, ax1 = plt.subplots(figsize=(22, 12))
+    def _generar_grafico_profesional_streamlit(self, variable: str, data: pd.DataFrame, info_entrenamiento: Dict, pestañas: Dict):
+        """Genera gráfico profesional optimizado para Streamlit"""
+        fig, ax1 = plt.subplots(figsize=(18, 10))
         fig.patch.set_facecolor(self.config['estilo_visual']['figura_facecolor'])
 
         x = np.arange(len(data.index))
         bars = ax1.bar(
             x, data['valor'],
             edgecolor=self.config['estilo_visual']['borde_color'],
-            width=0.65, zorder=5, alpha=0.98, linewidth=1.8
+            width=0.48, zorder=5, alpha=0.98, linewidth=1.8
         )
 
         # Aplicar gradiente según z-score
@@ -702,7 +688,7 @@ class AnalizadorEntrenamientos:
                     intensidad_amarilla = max(0.15, 0.45 - diferencia_relativa * 2)
                 self.visualizador.aplicar_gradiente_profesional(ax1, bar, 'amarillo', intensidad_amarilla)
 
-        # Límites de eje Y
+        # Límites de eje Y (considerando barras, bandas y bigotes)
         max_bar_value = (data['valor'].max() if not data['valor'].isna().all() else 0)
         max_std_value = ((data['mean'] + data['std']).max(skipna=True) if not (data[['mean','std']].isna().all().all()) else 0)
         max_3w = max([
@@ -710,48 +696,38 @@ class AnalizadorEntrenamientos:
             for pest in pestañas.values()
             if not pd.isna(pest['media3w']) and not pd.isna(pest['std3w'])
         ] + [0])
-        y_max_limit = max(max_bar_value, max_std_value, max_3w) * 1.18 if max(max_bar_value, max_std_value, max_3w) > 0 else 1
+        y_max_limit = max(max_bar_value, max_std_value, max_3w) * 1.15 if max(max_bar_value, max_std_value, max_3w) > 0 else 1
 
-        self._configurar_grafico_profesional(ax1, data, variable, info_entrenamiento, bars, pestañas, tendencias, y_max_limit)
-        plt.tight_layout(rect=[0, 0.06, 1, 0.97])
+        self._configurar_grafico_profesional(ax1, data, variable, info_entrenamiento, bars, pestañas, y_max_limit)
+        plt.tight_layout(rect=[0, 0.15, 1, 0.97])
 
-        # Leyenda
+        # Leyenda custom
         from matplotlib.patches import Patch
-        from matplotlib.lines import Line2D
-        
         legend_elements = [
-            Patch(facecolor='#8b1f1a', edgecolor='#495057', linewidth=2,
+            Patch(facecolor='#8b1f1a', edgecolor='#495057', linewidth=1.5,
                   label='🔴 SOBRECARGA (+1 STD) - Recuperación/Diferenciado'),
-            Patch(facecolor='#DAA520', edgecolor='#495057', linewidth=2,
+            Patch(facecolor='#DAA520', edgecolor='#495057', linewidth=1.5,
                   label='🟡 RANGO NORMAL (±1 STD) - Carga Óptima'),
-            Patch(facecolor='#20639b', edgecolor='#495057', linewidth=2,
+            Patch(facecolor='#20639b', edgecolor='#495057', linewidth=1.5,
                   label='🔵 SUBCARGA (-1 STD) - Revisar Intensidad'),
+            Patch(facecolor='#6c757d', edgecolor='#495057', linewidth=1.5,
+                  label='⚪ SIN HISTÓRICO - Datos Insuficientes'),
             Patch(facecolor='none', edgecolor='black', linewidth=4,
-                  label='μ₄ y ±σ₄: Media y desvío últimas 4 sesiones mismo turno'),
-            Line2D([0], [0], color='white', linewidth=2, marker='o', markersize=4,
-                  markerfacecolor='#1f77b4', markeredgecolor='white',
-                  label='📈 Sparkline: Tendencia últimos 21 días (dentro de barra)')
+                  label='μ₄ y ±σ₄: Media y desvío últimas 4 sesiones mismo turno')
         ]
-        
         fig.legend(
             handles=legend_elements,
-            loc='lower center',
-            bbox_to_anchor=(0.5, 0.0),
-            fontsize=10,
-            frameon=True,
-            fancybox=True,
-            shadow=True,
-            framealpha=0.98,
-            edgecolor='#495057',
-            ncol=3
+            loc='lower right',
+            bbox_to_anchor=(0.995, 0.020),
+            fontsize=9, frameon=True, fancybox=True, shadow=False, framealpha=0.95, edgecolor='#495057',
+            ncol=1
         )
-        
         return fig
 
-    def _configurar_grafico_profesional(self, ax, data, variable, info_entrenamiento, bars, pestañas, tendencias, y_max_limit):
+    def _configurar_grafico_profesional(self, ax, data, variable, info_entrenamiento, bars, pestañas, y_max_limit):
         estilo = self.config['estilo_visual']
         titulo = (
-            f"{variable} - Comparación Actual vs Histórico con Tendencia Integrada\n"
+            f"{variable} - Comparación Actual vs Histórico\n"
             f"Día: {info_entrenamiento.get('dia_semana', '')} | "
             f"Turno: {info_entrenamiento.get('turno', '')} | "
             f"Fecha: {info_entrenamiento.get('fecha', ''):%d/%m/%Y}"
@@ -763,7 +739,7 @@ class AnalizadorEntrenamientos:
         ax.set_xlabel('JUGADORES', fontsize=14, weight='bold', color=estilo['titulo_color'], labelpad=15)
 
         ax.set_xticks(np.arange(len(data.index)))
-        ax.set_xticklabels(data.index, rotation=45, ha='right', fontsize=10, weight='bold', color=estilo['texto_color'])
+        ax.set_xticklabels(data.index, rotation=90, fontsize=11, weight='bold', color=estilo['texto_color'])
         ax.set_ylim(0, y_max_limit)
 
         # Spines
@@ -778,7 +754,7 @@ class AnalizadorEntrenamientos:
                 color=estilo['grid_color'], linewidth=estilo['grid_linewidth'])
         ax.set_axisbelow(True)
 
-        # Bandas de histórico
+        # Bandas de histórico ±1 STD y media
         for i, jugador in enumerate(data.index):
             m = data.loc[jugador, 'mean']
             s = data.loc[jugador, 'std']
@@ -798,69 +774,14 @@ class AnalizadorEntrenamientos:
                 y_top = m4 + s4
                 x_centro = i
                 ax.plot([x_centro, x_centro], [y_bot, y_top], color='black', linewidth=3, zorder=15)
-                ax.plot([x_centro-0.22, x_centro+0.22], [m4, m4], color='black', linewidth=3, zorder=16)
-                label_fontsize = 9
+                ax.plot([x_centro-0.18, x_centro+0.18], [m4, m4], color='black', linewidth=3, zorder=16)
+                label_fontsize = 10
                 if m4 >= 0:
-                    ax.text(x_centro+0.28, m4, 'μ₄', va='center', ha='left', fontsize=label_fontsize, color='black', weight='bold', zorder=17)
+                    ax.text(x_centro+0.22, m4, 'μ₄', va='center', ha='left', fontsize=label_fontsize, color='black', weight='bold', zorder=17)
                 if y_top >= 0:
-                    ax.text(x_centro+0.28, y_top, '+σ₄', va='center', ha='left', fontsize=label_fontsize, color='black', weight='bold', zorder=17)
+                    ax.text(x_centro+0.22, y_top, '+σ₄', va='center', ha='left', fontsize=label_fontsize, color='black', weight='bold', zorder=17)
                 if y_bot > 0:
-                    ax.text(x_centro+0.28, y_bot, '-σ₄', va='center', ha='left', fontsize=label_fontsize, color='black', weight='bold', zorder=17)
-
-        # SPARKLINES INTEGRADOS DENTRO DE LAS BARRAS
-        for i, jugador in enumerate(data.index):
-            valores_trend = tendencias.get(jugador, np.array([]))
-            valor_actual = data.loc[jugador, 'valor']
-            
-            if len(valores_trend) >= 2 and not pd.isna(valor_actual) and valor_actual > 0:
-                # Normalizar valores
-                min_val = valores_trend.min()
-                max_val = valores_trend.max()
-                
-                if max_val > min_val:
-                    valores_norm = (valores_trend - min_val) / (max_val - min_val)
-                else:
-                    valores_norm = np.ones_like(valores_trend) * 0.5
-                
-                # Sparkline dentro de la barra
-                sparkline_height = valor_actual * 0.30
-                sparkline_y_base = valor_actual * 0.10
-                valores_scaled = sparkline_y_base + (valores_norm * sparkline_height)
-                
-                # Puntos X dentro del ancho de la barra
-                x_sparkline = np.linspace(i - 0.28, i + 0.28, len(valores_scaled))
-                
-                # Línea de tendencia con borde para contraste
-                line = ax.plot(x_sparkline, valores_scaled, 
-                       color='white', linewidth=2.2, alpha=0.95, zorder=25)[0]
-                line.set_path_effects([path_effects.withStroke(linewidth=3.5, foreground='#1f77b4', alpha=0.9)])
-                
-                # Marcadores
-                ax.scatter(x_sparkline, valores_scaled, 
-                          s=14, color='white', alpha=0.95, zorder=26, 
-                          edgecolors='#1f77b4', linewidths=1.5)
-                
-                # Indicador de tendencia
-                if len(valores_trend) >= 3:
-                    tendencia_reciente = valores_trend[-1] - valores_trend[0]
-                    valor_medio = (max_val - min_val) * 0.15
-                    
-                    if tendencia_reciente > valor_medio:
-                        marker_color = '#28a745'
-                        marker = '▲'
-                    elif tendencia_reciente < -valor_medio:
-                        marker_color = '#dc3545'
-                        marker = '▼'
-                    else:
-                        marker_color = '#ffc107'
-                        marker = '■'
-                    
-                    # Indicador en la esquina superior derecha de la barra
-                    ax.text(i + 0.28, valor_actual * 0.90, marker,
-                           fontsize=11, color=marker_color, weight='bold', 
-                           ha='right', va='top', zorder=27,
-                           bbox=dict(boxstyle='circle,pad=0.1', facecolor='white', 
-                                   edgecolor=marker_color, linewidth=1.5, alpha=0.9))
+                    ax.text(x_centro+0.22, y_bot, '-σ₄', va='center', ha='left', fontsize=label_fontsize, color='black', weight='bold', zorder=17)
 
         # Etiquetas de valor, media y z-score
         for i, (bar, valor) in enumerate(zip(bars, data['valor'])):
@@ -874,16 +795,14 @@ class AnalizadorEntrenamientos:
 
                 texto = f'{int(round(valor))}\nμ={media_disp}\nz={z_disp}'
                 ax.text(
-                    x_text, y_text + y_max_limit*0.02,
+                    x_text, y_text + y_max_limit*0.018,
                     texto,
-                    ha='center', va='bottom', fontsize=8, weight='bold',
-                    color=PALETA["texto"], zorder=6,
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
-                            edgecolor='gray', linewidth=0.8, alpha=0.85)
+                    ha='center', va='bottom', fontsize=8.5, weight='bold',
+                    color=PALETA["texto"], zorder=6
                 )
 
 # =========================
-# FUNCIÓN PRINCIPAL
+# FUNCIÓN PRINCIPAL DE ANÁLISIS COMPARATIVO
 # =========================
 def ejecutar_analisis_comparativo_streamlit(df, fecha_limite=None):
     """Función principal para ejecutar el análisis en Streamlit"""
@@ -898,12 +817,13 @@ st.caption("Monitoreo Semanal: Suma de Carga (Lunes-Domingo) y Ratio ACR")
 st.markdown("---")
 
 # =========================
-# SIDEBAR
+# SIDEBAR CONTROLES GLOBALES
 # =========================
 st.sidebar.header("⚙️ Parámetros de Análisis")
 with st.sidebar:
     st.markdown("Ajusta spans y umbrales para aplicar a todo el dashboard.")
 
+    # Spans EWMA (en días)
     acute_span_days = st.number_input(
         "Agudo (días)",
         min_value=7, max_value=28, value=7, step=7,
@@ -915,6 +835,7 @@ with st.sidebar:
         help="Ventana EWMA crónica en días; la carga se agrupa por semanas."
     )
 
+    # Umbrales ACR
     low_thr = st.slider(
         "Umbral bajo ACR", min_value=0.5, max_value=1.0,
         value=float(CONFIG_ANALISIS['acr_thresholds']['low']), step=0.05
@@ -924,11 +845,13 @@ with st.sidebar:
         value=float(CONFIG_ANALISIS['acr_thresholds']['high']), step=0.05
     )
 
+    # Rango máximo eje ACR
     ratio_axis_max = st.slider(
         "Máximo eje ACR", min_value=1.5, max_value=4.0,
         value=float(CONFIG_ANALISIS['ratio_axis_max']), step=0.1
     )
 
+    # Filtro por fecha global
     st.markdown("---")
     st.subheader("Filtro por Fecha")
     usar_filtro_fecha_global = st.checkbox("Activar filtro de fecha global", value=False)
@@ -940,6 +863,7 @@ with st.sidebar:
 df = cargar_datos()
 
 if df is not None:
+    # Filtro de fecha global
     if usar_filtro_fecha_global and 'Fecha' in df.columns and len(df) > 0:
         fecha_min = df['Fecha'].min().date()
         fecha_max = df['Fecha'].max().date()
@@ -954,6 +878,7 @@ if df is not None:
         st.info("Sin filtro de fecha global - analizando todos los datos disponibles.")
         fecha_limite_global = None
 
+    # Variables disponibles para análisis
     variables_analisis = [
         'Distancia Total',
         'Tot +16',
@@ -969,9 +894,11 @@ if df is not None:
         st.error("❌ No se encontraron las variables de análisis en los datos")
         st.info(f"Columnas disponibles: {list(df.columns)}")
     else:
+        # Tabs: variables + comparativo avanzado
         tab_names = variables_disponibles + ['analisis_avanzado']
         tabs = st.tabs([f"📊 {v}" if v != 'analisis_avanzado' else '📈 Análisis Comparativo Avanzado' for v in tab_names])
 
+        # Tabs individuales por variable
         for i, variable in enumerate(variables_disponibles):
             with tabs[i]:
                 st.subheader(f"📊 Análisis: {variable}")
@@ -979,6 +906,7 @@ if df is not None:
 
                 col1, col2 = st.columns([2, 1])
 
+                # Columna derecha: críticos y estadísticas
                 with col2:
                     st.markdown("### 🚨 Atletas en Situación Crítica")
 
@@ -999,11 +927,13 @@ if df is not None:
                             else:
                                 st.warning(f"⚠️ {row['Atleta']} - Ratio: {row['Último_Ratio']:.2f}")
 
+                        # Tabla resumen
                         st.dataframe(
                             atletas_criticos[['Atleta', 'Último_Ratio', 'Estado']],
                             use_container_width=True
                         )
 
+                        # Descargar CSV
                         csv_buf = io.StringIO()
                         atletas_criticos.to_csv(csv_buf, index=False)
                         st.download_button(
@@ -1015,6 +945,7 @@ if df is not None:
                     else:
                         st.success("✅ Todos los atletas en rangos normales")
 
+                    # Estadísticas globales
                     st.markdown("### 📈 Estadísticas Generales")
                     atletas_con_datos = 0
                     total_ratios_criticos = 0
@@ -1038,6 +969,7 @@ if df is not None:
                         pct_criticos = (total_ratios_criticos / max(atletas_con_datos, 1) * 100) if atletas_con_datos > 0 else 0
                         st.metric("% Atletas críticos", f"{pct_criticos:.1f}%", help="Proporción de atletas con ACR alto o bajo.")
 
+                # Columna izquierda: selector y gráfico
                 with col1:
                     atletas_disponibles = ['Seleccionar atleta...'] + sorted(df['Atleta'].dropna().unique().tolist())
                     atleta_seleccionado = st.selectbox(
@@ -1126,11 +1058,8 @@ if df is not None:
                             st.warning(f"❌ No hay suficientes datos para analizar a {atleta_seleccionado} en {variable}")
                             st.info("Se requieren al menos 21 días de datos para el análisis")
 
+        # Pestaña: 📈 Análisis Comparativo Avanzado
         with tabs[-1]:
             st.subheader("📈 Análisis Comparativo Avanzado")
             df_filtrado = df if fecha_limite_global is None else df[df['Fecha'] <= fecha_limite_global]
             ejecutar_analisis_comparativo_streamlit(df_filtrado, fecha_limite=fecha_limite_global)
-
-else:
-    st.error("No se pudieron cargar los datos. Verifica la ruta del archivo.")
- 
