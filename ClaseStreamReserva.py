@@ -76,6 +76,7 @@ sns.set_theme(context="talk", style="whitegrid")
 # =========================
 # CONFIGURACIÓN GLOBAL
 # =========================
+
 CONFIG_ANALISIS = {
     'rutas': {
         # Cambiado a ruta relativa, el archivo Excel debe estar en la misma carpeta que el script
